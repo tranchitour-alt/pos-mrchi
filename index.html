@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MR.CHÍ POS CLOUD v8.8 - View Bill History</title>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #6366f1; --primary-light: #eef2ff; --accent: #10b981; --danger: #f43f5e;
+            --bg-app: #f1f5f9; --sidebar: #0f172a; --glass: rgba(255, 255, 255, 0.95);
+        }
+
+        * { font-family: 'Lexend', sans-serif; box-sizing: border-box; transition: all 0.2s ease; }
+        body { background: var(--bg-app); margin: 0; display: flex; height: 100vh; overflow: hidden; color: #1e293b; }
+
+        #loading-overlay { position: fixed; inset: 0; background: rgba(255,255,255,0.8); z-index: 10000; display: none; align-items: center; justify-content: center; flex-direction: column; font-weight: 600; color: var(--primary); backdrop-filter: blur(4px); }
+
+        .sidebar { width: 85px; margin: 15px; border-radius: 24px; background: var(--sidebar); display: flex; flex-direction: column; align-items: center; padding: 25px 0; gap: 20px; }
+        .nav-item { width: 50px; height: 50px; border-radius: 15px; display: flex; align-items: center; justify-content: center; color: #94a3b8; cursor: pointer; font-size: 22px; }
+        .nav-item.active { background: var(--primary); color: white; transform: scale(1.1); box-shadow: 0 10px 15px rgba(99, 102, 241, 0.3); }
+
+        .main-container { flex-grow: 1; display: flex; padding: 15px 15px 15px 0; gap: 15px; overflow: hidden; }
+        .page { display: none; width: 100%; height: 100%; gap: 15px; overflow: hidden; }
+        .page.active { display: flex; }
+        .card { background: white; border-radius: 20px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); display: flex; flex-direction: column; overflow: hidden; border: 1px solid rgba(255,255,255,0.7); }
+
+        #login-screen { position: fixed; inset: 0; background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+        .login-box { background: var(--glass); padding: 40px; border-radius: 30px; width: 400px; text-align: center; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); }
+        .login-input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #e2e8f0; border-radius: 12px; font-size: 0.9rem; outline: none; }
+
+        .cat-chip { display: inline-flex; align-items: center; justify-content: center; white-space: nowrap; height: 38px; padding: 0 22px; border-radius: 50px; background: white; border: 1px solid #e2e8f0; cursor: pointer; font-size: 13px; color: #64748b; }
+        .cat-chip.active { background: var(--primary); color: white; border-color: var(--primary); font-weight: 600; }
+        .btn-pay { width: 100%; padding: 15px; border-radius: 12px; border: none; background: var(--accent); color: white; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th { background: #f8fafc; padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0; color: #64748b; position: sticky; top: 0; z-index: 10; }
+        td { padding: 12px; border-bottom: 1px solid #f1f5f9; }
+
+        /* Hiệu ứng hover cho bảng lịch sử */
+        #history-body tr { cursor: pointer; transition: background 0.2s; }
+        #history-body tr:hover { background: var(--primary-light); }
+
+        .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 12px; overflow-y: auto; flex-grow: 1; }
+        .p-card { background: white; border: 1px solid #f1f5f9; padding: 15px 10px; border-radius: 18px; cursor: pointer; text-align: center; height: 120px; display: flex; flex-direction: column; justify-content: space-between; }
+        .p-card:hover { border-color: var(--primary); background: var(--primary-light); transform: translateY(-3px); }
+
+        .filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 15px; background: #f8fafc; padding: 15px; border-radius: 15px; }
+
+        /* Print Area */
+        #print-area { display: none; }
+        @media print {
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+    <div style="font-size: 2.5rem; margin-bottom: 15px;">☁️</div>
+    <div id="loading-text">Đang đồng bộ dữ liệu...</div>
+</div>
+
+<div id="login-screen">
+    <div class="login-box">
+        <h1 style="color:#1e293b; margin: 0 0 20px; font-size: 1.4rem;">POS CLOUD v8.8</h1>
+        <select id="role-select" class="login-input"><option value="Admin">Quản trị viên 👑</option><option value="ThuNgan">Thu ngân viên 💵</option></select>
+        <input type="password" id="pass-input" class="login-input" placeholder="Mật khẩu...">
+        <button class="btn-pay" style="background: var(--primary);" onclick="handleLogin()">ĐĂNG NHẬP 🚀</button>
+        <p id="login-error" style="color:var(--danger); font-size:12px; margin-top:10px; display:none;">⚠️ Sai mật khẩu!</p>
+    </div>
+</div>
+
+<div class="sidebar">
+    <div class="nav-item active" title="Bán hàng" onclick="showPage('page-sale', this)">🛒</div>
+    <div class="nav-item" title="Lịch sử" onclick="showPage('page-history', this)">📜</div>
+    <div class="nav-item" title="Báo cáo ngày" onclick="showPage('page-report', this)">📊</div>
+    <div id="nav-admin" class="nav-item" title="Kho hàng" onclick="showPage('page-admin', this)">⚙️</div>
+    <div class="nav-item" style="margin-top: auto; color: var(--danger);" onclick="location.reload()">🔒</div>
+</div>
+
+<div class="main-container">
+    <div id="page-sale" class="page active">
+        <div class="sale-left card" style="flex: 2.5;">
+            <div style="display:flex; gap:12px; margin-bottom:15px;">
+                <input type="text" id="p-search" class="login-input" style="flex:1; margin:0;" placeholder="🔍 Tìm hàng hoặc quét mã..." onkeyup="renderProducts()">
+                <div style="background:var(--primary-light); color:var(--primary); padding:10px 18px; border-radius:12px; font-weight:800; border: 1px solid var(--primary);">
+                    Doanh thu: <span id="rt-revenue">0</span>đ
+                </div>
+            </div>
+            <div id="sale-cat-filter" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:10px; min-height: 50px;"></div>
+            <div id="product-grid" class="product-grid"></div>
+        </div>
+
+        <div class="sale-right card" style="flex: 1; min-width: 360px;">
+            <div id="order-tabs-list" style="display:flex; gap:8px; margin-bottom:15px; overflow-x:auto;"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
+                <input type="text" id="cust-name" class="login-input" style="margin:0;" placeholder="👤 Khách hàng">
+                <input type="text" id="barcode-input" class="login-input" style="margin:0; border:2px solid var(--primary);" placeholder="🏷️ Mã vạch..." onkeypress="handleBarcode(event)">
+            </div>
+            <div id="cart-items-ui" style="flex-grow:1; overflow-y:auto; margin-bottom:10px;"></div>
+            <textarea id="order-note" class="login-input" style="height: 50px; margin-bottom: 10px; resize: none;" placeholder="📝 Ghi chú hóa đơn..."></textarea>
+            <div style="background:var(--sidebar); color:white; padding:15px; border-radius:18px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:10px">
+                    <span>Tổng:</span><span id="cart-total" style="font-size:20px; font-weight:800; color:#fbbf24;">0đ</span>
+                </div>
+                <button class="btn-pay" onclick="doCheckout()">THANH TOÁN & IN</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="page-history" class="page">
+        <div class="card" style="flex: 2.5;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
+                <h3 style="margin:0">📜 Lịch sử hóa đơn Cloud</h3>
+                <button class="btn-pay" style="width:auto; padding:10px 20px; background:var(--accent)" onclick="exportHistoryExcel()">📤 Xuất Excel</button>
+            </div>
+            <div class="filter-row">
+                <div><label style="font-size:11px">Từ ngày</label><input type="date" id="f-start" class="login-input" style="margin:0"></div>
+                <div><label style="font-size:11px">Đến ngày</label><input type="date" id="f-end" class="login-input" style="margin:0"></div>
+                <input type="text" id="f-staff" class="login-input" style="margin-top:16px" placeholder="Nhân viên...">
+                <input type="text" id="f-cust" class="login-input" style="margin-top:16px" placeholder="Khách hàng...">
+                <input type="text" id="f-product" class="login-input" style="margin-top:16px" placeholder="Tên sản phẩm...">
+                <button class="btn-pay" style="margin-top:16px; background:var(--sidebar); height:45px" onclick="filterHistory()">LỌC 🔎</button>
+            </div>
+            <div style="overflow-y:auto; flex-grow:1;">
+                <table>
+                    <thead><tr><th>Thời gian</th><th>Khách</th><th>NV</th><th style="text-align:right">Tổng</th></tr></thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="card" style="flex: 1; min-width: 320px; background: #fdfdfd; border: 1px dashed #cbd5e1;">
+            <div id="bill-preview-content" style="height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #94a3b8; text-align: center;">
+                <div style="font-size: 40px; margin-bottom: 15px;">📄</div>
+                <p>Click vào một hóa đơn trong danh sách<br>để xem chi tiết tại đây.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="page-report" class="page">
+        <div class="card" style="width:100%">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
+                <div style="display:flex; align-items:center; gap:15px">
+                    <h3 style="margin:0">📊 Báo cáo ngày:</h3>
+                    <input type="date" id="report-date-picker" class="login-input" style="margin:0; width:180px" onchange="renderDailyReport()">
+                </div>
+                <button class="btn-pay" style="width:auto; padding:10px 20px; background:var(--primary)" onclick="window.print()">🖨️ In báo cáo</button>
+            </div>
+            <div style="overflow-y:auto; flex-grow:1;">
+                <table>
+                    <thead><tr><th>Sản phẩm</th><th style="text-align:center">Số lượng</th><th style="text-align:right">Đơn giá TB</th><th style="text-align:right">Thành tiền</th></tr></thead>
+                    <tbody id="report-body"></tbody>
+                    <tfoot>
+                        <tr style="background:#f8fafc; font-weight:800;"><td colspan="3" style="text-align:right; padding:20px;">TỔNG:</td><td id="report-total-all" style="text-align:right; color:var(--danger); padding:20px;">0đ</td></tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="page-admin" class="page">
+        <div class="card" style="width:100%">
+            <div id="manage-controls" style="display:grid; grid-template-columns:1fr 2fr 1fr 1fr auto; gap:10px; margin-bottom:15px;">
+                <input type="text" id="new-bc" class="login-input" placeholder="Mã vạch" style="margin:0">
+                <input type="text" id="new-name" class="login-input" placeholder="Tên hàng" style="margin:0">
+                <input type="number" id="new-price" class="login-input" placeholder="Giá bán" style="margin:0">
+                <input type="text" id="new-group" class="login-input" placeholder="Nhóm" style="margin:0">
+                <button class="btn-pay" style="width:auto; margin:0; background:var(--primary)" onclick="addManualProduct()">+ Thêm</button>
+            </div>
+            <div style="overflow-y:auto; flex-grow:1;">
+                <table>
+                    <thead><tr><th>Mã vạch</th><th>Tên hàng</th><th>Giá</th><th>Nhóm</th><th>Xóa</th></tr></thead>
+                    <tbody id="manage-list"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="print-area"></div>
+
+<script>
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyenTYo7JH9MoGAyTZBvOLjf6lAmfM3cyqGX4uC58m7UPAzRKwn0i4ElVkKHbdDuPLS2g/exec";
+    
+    let products = [];
+    let salesHistory = [];
+    let cats = [];
+    let orders = [{ id: 1, customer: '', cart: [] }];
+    let activeId = 1; let staff = ""; let role = "";
+    let filterCat = "All";
+
+    function showLoading(show, text = "Đang đồng bộ...") { 
+        document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; 
+        document.getElementById('loading-text').innerText = text;
+    }
+
+    async function handleLogin() {
+        role = document.getElementById('role-select').value;
+        const p = document.getElementById('pass-input').value;
+        if((role==='Admin' && p==='admin123') || (role==='ThuNgan' && p==='nv123')) {
+            staff = role; document.getElementById('login-screen').style.display='none';
+            init();
+        } else { document.getElementById('login-error').style.display='block'; }
+    }
+
+    async function init() {
+        showLoading(true);
+        const todayStr = new Date().toISOString().split('T')[0];
+        document.getElementById('f-start').value = todayStr;
+        document.getElementById('f-end').value = todayStr;
+        document.getElementById('report-date-picker').value = todayStr;
+        await loadCloudData();
+        renderCatData(); renderProducts(); renderTabs(); renderManage();
+        filterHistory(); renderDailyReport();
+        showLoading(false);
+    }
+
+    async function loadCloudData() {
+        try {
+            const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
+            products = await prodRes.json();
+            cats = ["Tất cả", ...new Set(products.map(p => p.group))];
+            const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
+            salesHistory = await saleRes.json();
+            updateRevenue();
+        } catch (e) { console.log("Lỗi tải Cloud"); }
+    }
+
+    // --- XỬ LÝ LỊCH SỬ & XEM TRƯỚC ---
+    function filterHistory() {
+        const start = new Date(document.getElementById('f-start').value);
+        const end = new Date(document.getElementById('f-end').value);
+        end.setHours(23, 59, 59);
+        const fs = document.getElementById('f-staff').value.toLowerCase();
+        const fc = document.getElementById('f-cust').value.toLowerCase();
+        const fp = document.getElementById('f-product').value.toLowerCase();
+
+        const filtered = salesHistory.filter(s => {
+            const d = new Date(s.date);
+            const mDate = d >= start && d <= end;
+            const mStaff = s.staff.toLowerCase().includes(fs);
+            const mCust = s.customer.toLowerCase().includes(fc);
+            let items = [];
+            try { items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items; } catch(e) {}
+            const mProd = fp === "" || items.some(i => i.name.toLowerCase().includes(fp));
+            return mDate && mStaff && mCust && mProd;
+        }).reverse();
+
+        document.getElementById('history-body').innerHTML = filtered.map((s, idx) => `
+            <tr onclick="viewBillDetail('${s.id}')">
+                <td>${new Date(s.date).toLocaleString('vi-VN')}</td>
+                <td><b>${s.customer}</b></td>
+                <td>${s.staff}</td>
+                <td style="text-align:right; font-weight:800; color:var(--danger)">${s.total}</td>
+            </tr>`).join('');
+    }
+
+    function viewBillDetail(id) {
+        const sale = salesHistory.find(s => s.id == id);
+        if(!sale) return;
+
+        let items = [];
+        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
+
+        const html = `
+            <div style="width: 100%; text-align: center; font-family: sans-serif; color: #1e293b;">
+                <h2 style="margin: 0; font-size: 1.2rem;">HÓA ĐƠN BÁN LẺ</h2>
+                <p style="font-size: 12px; margin: 5px 0 15px;">Mã đơn: ${sale.id}</p>
+                <div style="text-align: left; font-size: 13px; margin-bottom: 15px; line-height: 1.6;">
+                    <b>KH:</b> ${sale.customer}<br>
+                    <b>Ngày:</b> ${new Date(sale.date).toLocaleString('vi-VN')}<br>
+                    <b>NV:</b> ${sale.staff}
+                </div>
+                <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
+                <table style="width: 100%; font-size: 12px; margin-bottom: 15px;">
+                    ${items.map(i => `
+                        <tr>
+                            <td align="left" style="padding-bottom: 5px;">${i.name} x${i.qty}</td>
+                            <td align="right" style="padding-bottom: 5px;">${(i.curP * i.qty).toLocaleString()}đ</td>
+                        </tr>
+                    `).join('')}
+                </table>
+                <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
+                <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 800;">
+                    <span>TỔNG CỘNG:</span>
+                    <span style="color: var(--danger);">${sale.total}</span>
+                </div>
+                ${sale.note ? `<p style="text-align: left; font-size: 12px; color: #64748b; margin-top: 15px;"><b>Ghi chú:</b> ${sale.note}</p>` : ''}
+                <div style="margin-top: 30px; font-size: 11px; color: #94a3b8;">Cảm ơn quý khách!</div>
+                <button class="btn-pay no-print" style="margin-top: 20px; padding: 10px 15px; font-size: 12px; width: auto; background: var(--primary);" onclick="rePrintBill('${sale.id}')">🖨️ IN LẠI BILL</button>
+            </div>
+        `;
+        document.getElementById('bill-preview-content').innerHTML = html;
+        document.getElementById('bill-preview-content').style.justifyContent = "flex-start";
+    }
+
+    function rePrintBill(id) {
+        const sale = salesHistory.find(s => s.id == id);
+        if(!sale) return;
+        let items = [];
+        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
+        
+        let pthml = `<div style="text-align:center; font-family:sans-serif"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
+        items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
+        pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
+        document.getElementById('print-area').innerHTML = pthml;
+        window.print();
+    }
+
+    // --- CÁC HÀM CƠ BẢN (GIỮ NGUYÊN) ---
+    function renderDailyReport() {
+        const selectedDateStr = new Date(document.getElementById('report-date-picker').value).toLocaleDateString('vi-VN');
+        const reportData = {}; let totalRevenue = 0;
+        salesHistory.forEach(s => {
+            if (new Date(s.date).toLocaleDateString('vi-VN') === selectedDateStr) {
+                let items = []; try { items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items; } catch(e) {}
+                items.forEach(item => {
+                    if (!reportData[item.name]) { reportData[item.name] = { qty: 0, total: 0 }; }
+                    reportData[item.name].qty += item.qty;
+                    reportData[item.name].total += (item.curP * item.qty);
+                });
+                totalRevenue += typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g, '')) : s.total;
+            }
+        });
+        const rows = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${reportData[name].total.toLocaleString()}đ</td></tr>`);
+        document.getElementById('report-body').innerHTML = rows.join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
+        document.getElementById('report-total-all').innerText = totalRevenue.toLocaleString() + 'đ';
+    }
+
+    function renderCatData() {
+        let html = `<div class="cat-chip ${filterCat==='All'?'active':''}" onclick="setFilter('All')">Tất cả</div>`;
+        cats.filter(c => c && c !== "Tất cả").forEach(c => html += `<div class="cat-chip ${filterCat===c?'active':''}" onclick="setFilter('${c}')">${c}</div>`);
+        document.getElementById('sale-cat-filter').innerHTML = html;
+    }
+    function setFilter(c) { filterCat = c; renderCatData(); renderProducts(); }
+    function renderProducts() {
+        const s = document.getElementById('p-search').value.toLowerCase();
+        const filtered = products.filter(p => (filterCat==='All' || p.group===filterCat) && (p.name.toLowerCase().includes(s) || p.barcode.includes(s)));
+        document.getElementById('product-grid').innerHTML = filtered.map(p => `<div class="p-card" onclick="addToCart('${p.barcode}')"><b>${p.name}</b><span>${parseInt(p.price).toLocaleString()}đ</span></div>`).join('');
+    }
+    function addToCart(bc) {
+        const p = products.find(i => i.barcode === bc); if(!p) return;
+        const o = orders.find(o => o.id === activeId);
+        const ex = o.cart.find(i => i.barcode === bc);
+        if(ex) ex.qty++; else o.cart.push({...p, qty:1, curP: p.price});
+        updateCart();
+    }
+    function updateCart() {
+        const o = orders.find(o => o.id === activeId); let total = 0;
+        document.getElementById('cart-items-ui').innerHTML = o.cart.map((i, idx) => {
+            const st = i.curP * i.qty; total += st;
+            return `<div class="cart-item" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+                <div><b>${i.name}</b><br><input type="number" class="edit-input" value="${i.curP}" onchange="updateItem(${idx}, 'curP', this.value)">đ</div>
+                <div align="right">SL: <input type="number" class="edit-input" value="${i.qty}" min="1" onchange="updateItem(${idx}, 'qty', this.value)"><br><b>${st.toLocaleString()}đ</b></div>
+            </div>`;
+        }).join('');
+        document.getElementById('cart-total').innerText = total.toLocaleString() + 'đ';
+    }
+    function updateItem(idx, k, v) { orders.find(o=>o.id===activeId).cart[idx][k]=parseInt(v); updateCart(); }
+    async function doCheckout() {
+        const o = orders.find(o=>o.id===activeId); if(!o || !o.cart.length) return;
+        showLoading(true, "Lưu đơn...");
+        const sale = { action:'saveSale', id:Date.now(), date:new Date().toISOString(), staff, customer:document.getElementById('cust-name').value||"Khách lẻ", note:document.getElementById('order-note').value, items:JSON.stringify(o.cart), total:document.getElementById('cart-total').innerText };
+        try {
+            await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
+            salesHistory.push({...sale, items:JSON.parse(sale.items)});
+            rePrintBill(sale.id);
+            o.cart=[]; document.getElementById('order-note').value=''; updateCart(); updateRevenue(); filterHistory();
+        } catch(e) { alert("Lỗi!"); }
+        showLoading(false);
+    }
+    function renderTabs() {
+        document.getElementById('order-tabs-list').innerHTML = orders.map(o => `<button onclick="switchOrder(${o.id})" style="padding:8px 15px; border:none; border-radius:12px; cursor:pointer; background:${o.id===activeId?'var(--primary)':'#e2e8f0'}; color:${o.id===activeId?'white':'#64748b'}; font-weight:600;">Bàn #${o.id}</button>`).join('') + `<button onclick="addOrder()" style="border:none; background:none; cursor:pointer; font-size:22px; color:var(--primary); font-weight:bold;">+</button>`;
+    }
+    function switchOrder(id) { activeId = id; updateCart(); renderTabs(); }
+    function addOrder() { const id = orders.length>0?Math.max(...orders.map(o=>o.id))+1:1; orders.push({id, customer:'', cart:[]}); switchOrder(id); }
+    function showPage(id, el) { document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(id).classList.add('active'); el.classList.add('active'); if(id==='page-report') renderDailyReport(); }
+    function handleBarcode(e) { if(e.key==='Enter') { addToCart(e.target.value); e.target.value=''; } }
+    function updateRevenue() { const today = new Date().toLocaleDateString('vi-VN'); const rev = salesHistory.filter(s => new Date(s.date).toLocaleDateString('vi-VN') === today).reduce((a,b) => a + parseInt(b.total.replace(/[^\d]/g,'')), 0); document.getElementById('rt-revenue').innerText = rev.toLocaleString(); }
+    function renderManage() { document.getElementById('manage-list').innerHTML = products.map((p,i) => `<tr><td>${p.barcode}</td><td><b>${p.name}</b></td><td>${parseInt(p.price).toLocaleString()}đ</td><td>${p.group}</td><td><button onclick="deleteProduct(${i})" style="color:red; border:none; background:none; cursor:pointer">Xóa</button></td></tr>`).join(''); }
+    async function addManualProduct() { const bc=document.getElementById('new-bc').value, n=document.getElementById('new-name').value, p=document.getElementById('new-price').value, g=document.getElementById('new-group').value; if(!bc||!n) return; products.push({barcode:bc, name:n, price:parseInt(p), group:g}); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
+    async function deleteProduct(i) { if(!confirm("Xóa?")) return; products.splice(i,1); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
+</script>
+</body>
+</html>
