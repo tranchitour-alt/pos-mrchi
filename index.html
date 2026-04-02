@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MR.CHÍ POS CLOUD v8.8 - View Bill History</title>
+    <title>MR.CHÍ POS CLOUD v8.8 - Multi-User</title>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -38,7 +38,6 @@
         th { background: #f8fafc; padding: 12px; text-align: left; border-bottom: 2px solid #e2e8f0; color: #64748b; position: sticky; top: 0; z-index: 10; }
         td { padding: 12px; border-bottom: 1px solid #f1f5f9; }
 
-        /* Hiệu ứng hover cho bảng lịch sử */
         #history-body tr { cursor: pointer; transition: background 0.2s; }
         #history-body tr:hover { background: var(--primary-light); }
 
@@ -48,7 +47,8 @@
 
         .filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 15px; background: #f8fafc; padding: 15px; border-radius: 15px; }
 
-        /* Print Area */
+        .edit-input { width: 70px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; text-align: center; }
+
         #print-area { display: none; }
         @media print {
             body * { visibility: hidden; }
@@ -67,7 +67,14 @@
 <div id="login-screen">
     <div class="login-box">
         <h1 style="color:#1e293b; margin: 0 0 20px; font-size: 1.4rem;">POS CLOUD v8.8</h1>
-        <select id="role-select" class="login-input"><option value="Admin">Quản trị viên 👑</option><option value="ThuNgan">Thu ngân viên 💵</option></select>
+        <select id="role-select" class="login-input">
+            <option value="Admin">Quản trị viên 👑</option>
+            <option value="nv1">Thu ngân NV1 💵</option>
+            <option value="nv2">Thu ngân NV2 💵</option>
+            <option value="nv3">Thu ngân NV3 💵</option>
+            <option value="nv4">Thu ngân NV4 💵</option>
+            <option value="nv5">Thu ngân NV5 💵</option>
+        </select>
         <input type="password" id="pass-input" class="login-input" placeholder="Mật khẩu...">
         <button class="btn-pay" style="background: var(--primary);" onclick="handleLogin()">ĐĂNG NHẬP 🚀</button>
         <p id="login-error" style="color:var(--danger); font-size:12px; margin-top:10px; display:none;">⚠️ Sai mật khẩu!</p>
@@ -184,6 +191,7 @@
 <div id="print-area"></div>
 
 <script>
+    // URL Web App từ Google Apps Script của bạn
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyenTYo7JH9MoGAyTZBvOLjf6lAmfM3cyqGX4uC58m7UPAzRKwn0i4ElVkKHbdDuPLS2g/exec";
     
     let products = [];
@@ -198,13 +206,31 @@
         document.getElementById('loading-text').innerText = text;
     }
 
+    // --- CẬP NHẬT HÀM ĐĂNG NHẬP CHO 5 TÀI KHOẢN ---
     async function handleLogin() {
-        role = document.getElementById('role-select').value;
+        const selectedRole = document.getElementById('role-select').value;
         const p = document.getElementById('pass-input').value;
-        if((role==='Admin' && p==='admin123') || (role==='ThuNgan' && p==='nv123')) {
-            staff = role; document.getElementById('login-screen').style.display='none';
+        
+        // Kiểm tra Admin
+        if (selectedRole === 'Admin' && p === 'admin123') {
+            staff = "Quản trị viên";
+            document.getElementById('login-screen').style.display = 'none';
             init();
-        } else { document.getElementById('login-error').style.display='block'; }
+            return;
+        }
+
+        // Kiểm tra 5 tài khoản thu ngân (Dùng chung pass nv123)
+        const cashierAccounts = ["nv1", "nv2", "nv3", "nv4", "nv5"];
+        if (cashierAccounts.includes(selectedRole) && p === 'nv123') {
+            staff = "Thu ngân " + selectedRole.toUpperCase();
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('nav-admin').style.display = 'none'; // Thu ngân không vào được kho
+            init();
+            return;
+        }
+
+        // Nếu sai
+        document.getElementById('login-error').style.display = 'block';
     }
 
     async function init() {
@@ -230,7 +256,6 @@
         } catch (e) { console.log("Lỗi tải Cloud"); }
     }
 
-    // --- XỬ LÝ LỊCH SỬ & XEM TRƯỚC ---
     function filterHistory() {
         const start = new Date(document.getElementById('f-start').value);
         const end = new Date(document.getElementById('f-end').value);
@@ -262,7 +287,6 @@
     function viewBillDetail(id) {
         const sale = salesHistory.find(s => s.id == id);
         if(!sale) return;
-
         let items = [];
         try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
 
@@ -277,12 +301,7 @@
                 </div>
                 <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
                 <table style="width: 100%; font-size: 12px; margin-bottom: 15px;">
-                    ${items.map(i => `
-                        <tr>
-                            <td align="left" style="padding-bottom: 5px;">${i.name} x${i.qty}</td>
-                            <td align="right" style="padding-bottom: 5px;">${(i.curP * i.qty).toLocaleString()}đ</td>
-                        </tr>
-                    `).join('')}
+                    ${items.map(i => `<tr><td align="left" style="padding-bottom: 5px;">${i.name} x${i.qty}</td><td align="right">${(i.curP * i.qty).toLocaleString()}đ</td></tr>`).join('')}
                 </table>
                 <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
                 <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 800;">
@@ -303,7 +322,6 @@
         if(!sale) return;
         let items = [];
         try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
-        
         let pthml = `<div style="text-align:center; font-family:sans-serif"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
         items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
         pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
@@ -311,7 +329,6 @@
         window.print();
     }
 
-    // --- CÁC HÀM CƠ BẢN (GIỮ NGUYÊN) ---
     function renderDailyReport() {
         const selectedDateStr = new Date(document.getElementById('report-date-picker').value).toLocaleDateString('vi-VN');
         const reportData = {}; let totalRevenue = 0;
