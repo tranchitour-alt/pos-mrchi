@@ -190,8 +190,8 @@
 <div id="print-area"></div>
 
 <script>
-    // Cập nhật SCRIPT_URL mới nhất
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJEI6Wue4etACPrTMNXFwu7zNvwwrMNqwJwsXbjXVjAtUHGcUJ-urC8nam1Gb53GPckA/exec";
+    // SCRIPT_URL mới nhất đã được dán vào đây
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwUGwZ72RltzE76MG_tlouNk6TJV83ofBg_vzgjjGF6qeji4lztclq98ziQu_pYS_UFIQ/exec";
     
     let products = [];
     let salesHistory = [];
@@ -244,20 +244,19 @@
 
     async function loadCloudData() {
         try {
-            // Tải sản phẩm
             const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
+            if (!prodRes.ok) throw new Error("Network response was not ok for getProducts");
             products = await prodRes.json();
             cats = ["Tất cả", ...new Set(products.map(p => p.group))];
             
-            // Tải lịch sử bán hàng
             const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
+            if (!saleRes.ok) throw new Error("Network response was not ok for getSales");
             salesHistory = await saleRes.json();
             
-            // Cập nhật doanh thu trên giao diện
             updateRevenue();
         } catch (e) { 
             console.error("Lỗi đồng bộ Cloud:", e);
-            alert("Không thể kết nối Cloud. Hãy kiểm tra kết nối mạng hoặc SCRIPT_URL.");
+            alert("Không thể kết nối Cloud. Hãy kiểm tra kết nối mạng hoặc thiết lập 'Anyone' trong Apps Script.");
         }
     }
 
@@ -268,12 +267,11 @@
             return saleDate === today;
         }).reduce((a, b) => {
             const totalVal = typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total;
-            return a + totalVal;
+            return a + (isNaN(totalVal) ? 0 : totalVal);
         }, 0);
         document.getElementById('rt-revenue').innerText = rev.toLocaleString();
     }
 
-    // Các hàm xử lý giao diện khác giữ nguyên như yêu cầu của bạn...
     function filterHistory() {
         const start = new Date(document.getElementById('f-start').value);
         const end = new Date(document.getElementById('f-end').value);
@@ -349,7 +347,7 @@
                     reportData[item.name].total += (item.curP * item.qty);
                 });
                 const totalVal = typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g,'')) : s.total;
-                totalRevenue += totalVal;
+                totalRevenue += (isNaN(totalVal) ? 0 : totalVal);
             }
         });
         
@@ -358,7 +356,6 @@
         document.getElementById('report-total-all').innerText = totalRevenue.toLocaleString() + 'đ';
     }
 
-    // Các hàm điều hướng và quản lý đơn hàng cơ bản
     function renderCatData() {
         let html = `<div class="cat-chip ${filterCat==='All'?'active':''}" onclick="setFilter('All')">Tất cả</div>`;
         cats.filter(c => c && c !== "Tất cả").forEach(c => html += `<div class="cat-chip ${filterCat===c?'active':''}" onclick="setFilter('${c}')">${c}</div>`);
@@ -394,11 +391,15 @@
         showLoading(true, "Đang xử lý...");
         const sale = { action:'saveSale', id:Date.now(), date:new Date().toISOString(), staff, customer:document.getElementById('cust-name').value||"Khách lẻ", note:document.getElementById('order-note').value, items:JSON.stringify(o.cart), total:document.getElementById('cart-total').innerText };
         try {
-            await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
+            const response = await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
+            if (!response.ok) throw new Error("Lỗi khi lưu hóa đơn lên Google Sheets");
             salesHistory.push({...sale, items:JSON.parse(sale.items)});
             rePrintBill(sale.id);
             o.cart=[]; document.getElementById('order-note').value=''; updateCart(); updateRevenue(); filterHistory();
-        } catch(e) { alert("Lỗi lưu đơn!"); }
+        } catch(e) { 
+            console.error(e);
+            alert("Lỗi lưu đơn! Hãy kiểm tra kết nối mạng và thiết lập Google Apps Script."); 
+        }
         showLoading(false);
     }
     function renderTabs() {
