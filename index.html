@@ -104,11 +104,11 @@
         <div class="sale-right card" style="flex: 1; min-width: 360px;">
             <div id="order-tabs-list" style="display:flex; gap:8px; margin-bottom:15px; overflow-x:auto;"></div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px;">
-                <input type="text" id="cust-name" class="login-input" style="margin:0;" placeholder="👤 Khách hàng">
+                <input type="text" id="cust-name" class="login-input" style="margin:0;" placeholder="👤 Khách hàng" onchange="savePendingOrders()">
                 <input type="text" id="barcode-input" class="login-input" style="margin:0; border:2px solid var(--primary);" placeholder="🏷️ Mã vạch..." onkeypress="handleBarcode(event)">
             </div>
             <div id="cart-items-ui" style="flex-grow:1; overflow-y:auto; margin-bottom:10px;"></div>
-            <textarea id="order-note" class="login-input" style="height: 50px; margin-bottom: 10px; resize: none;" placeholder="📝 Ghi chú hóa đơn..."></textarea>
+            <textarea id="order-note" class="login-input" style="height: 50px; margin-bottom: 10px; resize: none;" placeholder="📝 Ghi chú hóa đơn..." onchange="savePendingOrders()"></textarea>
             <div style="background:var(--sidebar); color:white; padding:15px; border-radius:18px;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:10px">
                     <span>Tổng:</span><span id="cart-total" style="font-size:20px; font-weight:800; color:#fbbf24;">0đ</span>
@@ -203,13 +203,24 @@
     let products = [];
     let salesHistory = [];
     let cats = [];
-    let orders = [{ id: 1, customer: '', cart: [] }];
-    let activeId = 1; let staff = ""; let role = "";
+    let orders = [{ id: 1, customer: '', note: '', cart: [] }];
+    let activeId = 1; let staff = ""; 
     let filterCat = "All";
 
     function showLoading(show, text = "Đang đồng bộ...") { 
         document.getElementById('loading-overlay').style.display = show ? 'flex' : 'none'; 
         document.getElementById('loading-text').innerText = text;
+    }
+
+    // LƯU TRẠNG THÁI ĐƠN HÀNG ĐANG NHẬP (Dùng cho F5)
+    function savePendingOrders() {
+        const currentOrder = orders.find(o => o.id === activeId);
+        if (currentOrder) {
+            currentOrder.customer = document.getElementById('cust-name').value;
+            currentOrder.note = document.getElementById('order-note').value;
+        }
+        localStorage.setItem('pos_pending_orders', JSON.stringify(orders));
+        localStorage.setItem('pos_active_id', activeId);
     }
 
     async function handleLogin() {
@@ -229,34 +240,140 @@
 
     async function init() {
         showLoading(true);
+        
+        // 1. Khôi phục giỏ hàng đang nhập dở từ localStorage
+        const savedOrders = localStorage.getItem('pos_pending_orders');
+        const savedActiveId = localStorage.getItem('pos_active_id');
+        if (savedOrders) {
+            orders = JSON.parse(savedOrders);
+            activeId = parseInt(savedActiveId) || 1;
+        }
+
         const todayStr = new Date().toISOString().split('T')[0];
         document.getElementById('f-start').value = todayStr;
         document.getElementById('f-end').value = todayStr;
         document.getElementById('report-date-picker').value = todayStr;
+        
         await loadCloudData();
-        renderCatData(); renderProducts(); renderTabs(); renderManage(); filterHistory(); renderDailyReport();
+        
+        renderTabs(); 
+        updateCart(); 
         showLoading(false);
     }
 
     async function loadCloudData() {
-        try {
-            const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
-            products = await prodRes.json();
+        // Load nhanh từ LocalStorage trước để người dùng thấy ngay
+        const localProds = localStorage.getItem('pos_products');
+        const localSales = localStorage.getItem('pos_sales');
+        if(localProds) {
+            products = JSON.parse(localProds);
             cats = ["Tất cả", ...new Set(products.map(p => p.group))];
-            const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
-            salesHistory = await saleRes.json();
-            updateRevenue();
-        } catch (e) { console.error("Lỗi đồng bộ Cloud:", e); }
+            renderCatData(); renderProducts(); renderManage();
+        }
+        if(localSales) {
+            salesHistory = JSON.parse(localSales);
+            updateRevenue(); filterHistory(); renderDailyReport();
+        }
+
+        try {
+            // Sau đó mới tải từ Cloud để cập nhật mới nhất
+            const [prodRes, saleRes] = await Promise.all([
+                fetch(SCRIPT_URL + "?action=getProducts").then(r => r.json()),
+                fetch(SCRIPT_URL + "?action=getSales").then(r => r.json())
+            ]);
+            
+            products = prodRes;
+            salesHistory = saleRes;
+            
+            // Lưu lại vào LocalStorage
+            localStorage.setItem('pos_products', JSON.stringify(products));
+            localStorage.setItem('pos_sales', JSON.stringify(salesHistory));
+            
+            cats = ["Tất cả", ...new Set(products.map(p => p.group))];
+            renderCatData(); renderProducts(); renderManage(); filterHistory(); updateRevenue();
+        } catch (e) { console.error("Lỗi đồng bộ:", e); }
     }
 
-    // CHỨC NĂNG LỊCH SỬ & XÓA
+    // QUẢN LÝ GIỎ HÀNG
+    function updateCart() {
+        const o = orders.find(o => o.id === activeId); 
+        let total = 0;
+        
+        // Cập nhật thông tin khách hàng và ghi chú của tab hiện tại
+        document.getElementById('cust-name').value = o.customer || '';
+        document.getElementById('order-note').value = o.note || '';
+
+        document.getElementById('cart-items-ui').innerHTML = o.cart.map((i, idx) => {
+            const st = i.curP * i.qty; total += st;
+            return `<div class="cart-item" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+                <div><b>${i.name}</b><br><input type="number" class="edit-input" value="${i.curP}" onchange="updateItem(${idx}, 'curP', this.value)">đ</div>
+                <div align="right">SL: <input type="number" step="0.001" class="edit-input" value="${i.qty}" min="0.001" onchange="updateItem(${idx}, 'qty', this.value)"><br><b>${Math.round(st).toLocaleString()}đ</b></div>
+            </div>`;
+        }).join('');
+        
+        document.getElementById('cart-total').innerText = Math.round(total).toLocaleString() + 'đ';
+        savePendingOrders();
+    }
+
+    function updateItem(idx, k, v) { 
+        orders.find(o=>o.id===activeId).cart[idx][k] = parseFloat(v); 
+        updateCart(); 
+    }
+
+    function addToCart(bc) {
+        const p = products.find(i => i.barcode === bc); if(!p) return;
+        const o = orders.find(o => o.id === activeId);
+        const ex = o.cart.find(i => i.barcode === bc);
+        if(ex) ex.qty++; else o.cart.push({...p, qty:1, curP: p.price});
+        updateCart();
+    }
+
+    // THANH TOÁN
+    async function doCheckout() {
+        const o = orders.find(o=>o.id===activeId); if(!o || !o.cart.length) return;
+        showLoading(true, "Đang xử lý...");
+        
+        const totalStr = document.getElementById('cart-total').innerText;
+        const sale = { 
+            action:'saveSale', 
+            id:Date.now(), 
+            date:new Date().toISOString(), 
+            staff, 
+            customer:document.getElementById('cust-name').value||"Khách lẻ", 
+            note:document.getElementById('order-note').value, 
+            items:JSON.stringify(o.cart), 
+            total:totalStr 
+        };
+
+        try {
+            await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
+            
+            // Cập nhật mảng local và LocalStorage ngay lập tức
+            salesHistory.push({...sale, items:JSON.parse(sale.items)});
+            localStorage.setItem('pos_sales', JSON.stringify(salesHistory));
+            
+            rePrintBill(sale.id);
+            
+            // Xóa tab hiện tại sau khi thanh toán
+            o.cart=[]; o.customer=''; o.note='';
+            document.getElementById('cust-name').value = '';
+            document.getElementById('order-note').value = '';
+            
+            updateCart(); 
+            updateRevenue(); 
+            filterHistory();
+        } catch(e) { alert("Lỗi lưu đơn!"); }
+        showLoading(false);
+    }
+
+    // LỊCH SỬ & XÓA
     function filterHistory() {
         const start = new Date(document.getElementById('f-start').value);
         const end = new Date(document.getElementById('f-end').value);
         end.setHours(23, 59, 59);
         const fs = document.getElementById('f-staff').value.toLowerCase();
         const fc = document.getElementById('f-cust').value.toLowerCase();
-        const fn = document.getElementById('f-note').value.toLowerCase(); // Tìm theo ghi chú
+        const fn = document.getElementById('f-note').value.toLowerCase();
 
         const filtered = salesHistory.filter(s => {
             const d = new Date(s.date);
@@ -278,6 +395,19 @@
         updateBulkButton();
     }
 
+    async function handleBulkDelete() {
+        if (!confirm("Xóa các hóa đơn đã chọn?")) return;
+        const idsToDelete = Array.from(document.querySelectorAll('.row-check:checked')).map(cb => cb.value);
+        showLoading(true, "Đang xóa...");
+        try {
+            await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'deleteSales', ids: idsToDelete }) });
+            salesHistory = salesHistory.filter(s => !idsToDelete.includes(String(s.id)));
+            localStorage.setItem('pos_sales', JSON.stringify(salesHistory));
+            filterHistory(); updateRevenue();
+        } catch (e) { alert("Lỗi khi xóa!"); }
+        showLoading(false);
+    }
+
     function toggleCheckAll(source) {
         document.querySelectorAll('.row-check').forEach(ck => ck.checked = source.checked);
         updateBulkButton();
@@ -286,61 +416,7 @@
     function updateBulkButton() {
         const checkedCount = document.querySelectorAll('.row-check:checked').length;
         document.getElementById('btn-bulk-delete').style.display = checkedCount > 0 ? 'block' : 'none';
-        document.getElementById('btn-bulk-delete').innerText = `🗑️ Xóa ${checkedCount} hóa đơn`;
-    }
-
-    async function handleBulkDelete() {
-        if (!confirm("Bạn có chắc chắn muốn xóa các hóa đơn đã chọn không?")) return;
-        const idsToDelete = Array.from(document.querySelectorAll('.row-check:checked')).map(cb => cb.value);
-        
-        showLoading(true, "Đang xóa dữ liệu...");
-        try {
-            const res = await fetch(SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify({ action: 'deleteSales', ids: idsToDelete })
-            });
-            if (res.ok) {
-                salesHistory = salesHistory.filter(s => !idsToDelete.includes(String(s.id)));
-                filterHistory();
-                updateRevenue();
-                alert("Đã xóa thành công!");
-            }
-        } catch (e) { alert("Lỗi khi xóa hóa đơn!"); }
-        showLoading(false);
-    }
-
-    // CHỨC NĂNG BÁN HÀNG (CHỈNH SỐ LẺ)
-    function updateCart() {
-        const o = orders.find(o => o.id === activeId); let total = 0;
-        document.getElementById('cart-items-ui').innerHTML = o.cart.map((i, idx) => {
-            const st = i.curP * i.qty; total += st;
-            return `<div class="cart-item" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
-                <div><b>${i.name}</b><br><input type="number" class="edit-input" value="${i.curP}" onchange="updateItem(${idx}, 'curP', this.value)">đ</div>
-                <div align="right">SL: <input type="number" step="0.001" class="edit-input" value="${i.qty}" min="0.001" onchange="updateItem(${idx}, 'qty', this.value)"><br><b>${st.toLocaleString()}đ</b></div>
-            </div>`;
-        }).join('');
-        document.getElementById('cart-total').innerText = Math.round(total).toLocaleString() + 'đ';
-    }
-
-    function updateItem(idx, k, v) { 
-        orders.find(o=>o.id===activeId).cart[idx][k] = parseFloat(v); 
-        updateCart(); 
-    }
-
-    function addToCart(bc) {
-        const p = products.find(i => i.barcode === bc); if(!p) return;
-        const o = orders.find(o => o.id === activeId);
-        const ex = o.cart.find(i => i.barcode === bc);
-        if(ex) ex.qty++; else o.cart.push({...p, qty:1, curP: p.price});
-        updateCart();
-    }
-
-    // PHẦN CÒN LẠI GIỮ NGUYÊN TỪ BẢN GỐC CỦA BẠN
-    function updateRevenue() {
-        const today = new Date().toLocaleDateString('vi-VN');
-        const rev = salesHistory.filter(s => new Date(s.date).toLocaleDateString('vi-VN') === today)
-                                .reduce((a, b) => a + (typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total), 0);
-        document.getElementById('rt-revenue').innerText = rev.toLocaleString();
+        document.getElementById('btn-bulk-delete').innerText = `🗑️ Xóa ${checkedCount} đơn`;
     }
 
     function viewBillDetail(id) {
@@ -349,39 +425,80 @@
         let items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
         const html = `
             <div style="width: 100%; text-align: center;">
-                <h2 style="margin: 0;">HÓA ĐƠN BÁN LẺ</h2>
-                <p style="font-size: 12px;">Mã: ${sale.id}</p>
-                <div style="text-align: left; font-size: 13px; line-height: 1.6;">
+                <h3 style="margin: 0;">CHI TIẾT HÓA ĐƠN</h3>
+                <p style="font-size: 11px;">${sale.id}</p>
+                <div style="text-align: left; font-size: 13px;">
                     <b>KH:</b> ${sale.customer}<br>
                     <b>Ngày:</b> ${new Date(sale.date).toLocaleString('vi-VN')}<br>
-                    <b>Ghi chú:</b> ${sale.note || 'Không'}<br>
+                    <b>Ghi chú:</b> ${sale.note || '-'}<br>
                     <b>NV:</b> ${sale.staff}
                 </div>
-                <hr style="border-top: 1px dashed #ccc;">
+                <hr>
                 <table style="width: 100%; font-size: 12px;">
-                    ${items.map(i => `<tr><td align="left">${i.name} x${i.qty}</td><td align="right">${(i.curP * i.qty).toLocaleString()}đ</td></tr>`).join('')}
+                    ${items.map(i => `<tr><td>${i.name} x${i.qty}</td><td align="right">${(i.curP * i.qty).toLocaleString()}đ</td></tr>`).join('')}
                 </table>
-                <hr style="border-top: 1px dashed #ccc;">
-                <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 800;">
-                    <span>TỔNG CỘNG:</span><span>${sale.total}</span>
+                <hr>
+                <div style="display: flex; justify-content: space-between; font-weight: 800; font-size: 16px;">
+                    <span>TỔNG:</span><span>${sale.total}</span>
                 </div>
-                <button class="btn-pay" style="margin-top: 20px; background: var(--primary);" onclick="rePrintBill('${sale.id}')">🖨️ IN LẠI BILL</button>
-                <button class="btn-pay" style="margin-top: 10px; background: var(--danger);" onclick="deleteSingleSale('${sale.id}')">🗑️ XOÁ HOÁ ĐƠN NÀY</button>
+                <button class="btn-pay" style="margin-top: 15px; background: var(--primary);" onclick="rePrintBill('${sale.id}')">🖨️ IN LẠI</button>
+                <button class="btn-pay" style="margin-top: 8px; background: var(--danger);" onclick="handleBulkDeleteSingle('${sale.id}')">🗑️ XOÁ ĐƠN NÀY</button>
             </div>`;
         document.getElementById('bill-preview-content').innerHTML = html;
         document.getElementById('bill-preview-content').style.justifyContent = "flex-start";
     }
 
-    async function deleteSingleSale(id) {
+    async function handleBulkDeleteSingle(id) {
         if(!confirm("Xóa hóa đơn này?")) return;
         showLoading(true);
         try {
             await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'deleteSales', ids: [id] }) });
             salesHistory = salesHistory.filter(s => String(s.id) !== String(id));
+            localStorage.setItem('pos_sales', JSON.stringify(salesHistory));
             filterHistory(); updateRevenue();
             document.getElementById('bill-preview-content').innerHTML = "Đã xóa";
         } catch(e) {}
         showLoading(false);
+    }
+
+    // CÁC HÀM TIỆN ÍCH KHÁC
+    function updateRevenue() {
+        const today = new Date().toLocaleDateString('vi-VN');
+        const rev = salesHistory.filter(s => new Date(s.date).toLocaleDateString('vi-VN') === today)
+                                .reduce((a, b) => a + (typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total), 0);
+        document.getElementById('rt-revenue').innerText = rev.toLocaleString();
+    }
+
+    function renderCatData() {
+        let html = `<div class="cat-chip ${filterCat==='All'?'active':''}" onclick="setFilter('All')">Tất cả</div>`;
+        cats.filter(c => c && c !== "Tất cả").forEach(c => html += `<div class="cat-chip ${filterCat===c?'active':''}" onclick="setFilter('${c}')">${c}</div>`);
+        document.getElementById('sale-cat-filter').innerHTML = html;
+    }
+    function setFilter(c) { filterCat = c; renderCatData(); renderProducts(); }
+    
+    function renderProducts() {
+        const s = document.getElementById('p-search').value.toLowerCase();
+        const filtered = products.filter(p => (filterCat==='All' || p.group===filterCat) && (p.name.toLowerCase().includes(s) || p.barcode.includes(s)));
+        document.getElementById('product-grid').innerHTML = filtered.map(p => `<div class="p-card" onclick="addToCart('${p.barcode}')"><b>${p.name}</b><span>${parseInt(p.price).toLocaleString()}đ</span></div>`).join('');
+    }
+
+    function renderTabs() {
+        document.getElementById('order-tabs-list').innerHTML = orders.map(o => `<button onclick="switchOrder(${o.id})" style="padding:8px 15px; border:none; border-radius:12px; cursor:pointer; background:${o.id===activeId?'var(--primary)':'#e2e8f0'}; color:${o.id===activeId?'white':'#64748b'}; font-weight:600;">Bàn #${o.id}</button>`).join('') + `<button onclick="addOrder()" style="border:none; background:none; cursor:pointer; font-size:22px; color:var(--primary); font-weight:bold;">+</button>`;
+    }
+    function switchOrder(id) { activeId = id; updateCart(); renderTabs(); }
+    function addOrder() { const id = orders.length>0?Math.max(...orders.map(o=>o.id))+1:1; orders.push({id, customer:'', note:'', cart:[]}); switchOrder(id); }
+    function showPage(id, el) { document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(id).classList.add('active'); el.classList.add('active'); if(id==='page-report') renderDailyReport(); }
+    function handleBarcode(e) { if(e.key==='Enter') { addToCart(e.target.value); e.target.value=''; } }
+    
+    function rePrintBill(id) {
+        const sale = salesHistory.find(s => s.id == id);
+        if(!sale) return;
+        let items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
+        let pthml = `<div style="text-align:center;"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
+        items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${Math.round(i.curP*i.qty).toLocaleString()}đ</span></div>`);
+        pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
+        document.getElementById('print-area').innerHTML = pthml;
+        window.print();
     }
 
     function renderDailyReport() {
@@ -399,50 +516,10 @@
                 totalRevenue += (typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g,'')) : s.total);
             }
         });
-        document.getElementById('report-body').innerHTML = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${reportData[name].total.toLocaleString()}đ</td></tr>`).join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
+        document.getElementById('report-body').innerHTML = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${Math.round(reportData[name].total).toLocaleString()}đ</td></tr>`).join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
         document.getElementById('report-total-all').innerText = totalRevenue.toLocaleString() + 'đ';
     }
 
-    function renderCatData() {
-        let html = `<div class="cat-chip ${filterCat==='All'?'active':''}" onclick="setFilter('All')">Tất cả</div>`;
-        cats.filter(c => c && c !== "Tất cả").forEach(c => html += `<div class="cat-chip ${filterCat===c?'active':''}" onclick="setFilter('${c}')">${c}</div>`);
-        document.getElementById('sale-cat-filter').innerHTML = html;
-    }
-    function setFilter(c) { filterCat = c; renderCatData(); renderProducts(); }
-    function renderProducts() {
-        const s = document.getElementById('p-search').value.toLowerCase();
-        const filtered = products.filter(p => (filterCat==='All' || p.group===filterCat) && (p.name.toLowerCase().includes(s) || p.barcode.includes(s)));
-        document.getElementById('product-grid').innerHTML = filtered.map(p => `<div class="p-card" onclick="addToCart('${p.barcode}')"><b>${p.name}</b><span>${parseInt(p.price).toLocaleString()}đ</span></div>`).join('');
-    }
-    async function doCheckout() {
-        const o = orders.find(o=>o.id===activeId); if(!o || !o.cart.length) return;
-        showLoading(true, "Đang xử lý...");
-        const sale = { action:'saveSale', id:Date.now(), date:new Date().toISOString(), staff, customer:document.getElementById('cust-name').value||"Khách lẻ", note:document.getElementById('order-note').value, items:JSON.stringify(o.cart), total:document.getElementById('cart-total').innerText };
-        try {
-            await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
-            salesHistory.push({...sale, items:JSON.parse(sale.items)});
-            rePrintBill(sale.id);
-            o.cart=[]; document.getElementById('order-note').value=''; updateCart(); updateRevenue(); filterHistory();
-        } catch(e) { alert("Lỗi lưu đơn!"); }
-        showLoading(false);
-    }
-    function renderTabs() {
-        document.getElementById('order-tabs-list').innerHTML = orders.map(o => `<button onclick="switchOrder(${o.id})" style="padding:8px 15px; border:none; border-radius:12px; cursor:pointer; background:${o.id===activeId?'var(--primary)':'#e2e8f0'}; color:${o.id===activeId?'white':'#64748b'}; font-weight:600;">Bàn #${o.id}</button>`).join('') + `<button onclick="addOrder()" style="border:none; background:none; cursor:pointer; font-size:22px; color:var(--primary); font-weight:bold;">+</button>`;
-    }
-    function switchOrder(id) { activeId = id; updateCart(); renderTabs(); }
-    function addOrder() { const id = orders.length>0?Math.max(...orders.map(o=>o.id))+1:1; orders.push({id, customer:'', cart:[]}); switchOrder(id); }
-    function showPage(id, el) { document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(id).classList.add('active'); el.classList.add('active'); if(id==='page-report') renderDailyReport(); }
-    function handleBarcode(e) { if(e.key==='Enter') { addToCart(e.target.value); e.target.value=''; } }
-    function rePrintBill(id) {
-        const sale = salesHistory.find(s => s.id == id);
-        if(!sale) return;
-        let items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
-        let pthml = `<div style="text-align:center;"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
-        items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
-        pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
-        document.getElementById('print-area').innerHTML = pthml;
-        window.print();
-    }
     function renderManage() { document.getElementById('manage-list').innerHTML = products.map((p,i) => `<tr><td>${p.barcode}</td><td><b>${p.name}</b></td><td>${parseInt(p.price).toLocaleString()}đ</td><td>${p.group}</td><td><button onclick="deleteProduct(${i})" style="color:red; border:none; background:none; cursor:pointer">Xóa</button></td></tr>`).join(''); }
     async function addManualProduct() { const bc=document.getElementById('new-bc').value, n=document.getElementById('new-name').value, p=document.getElementById('new-price').value, g=document.getElementById('new-group').value; if(!bc||!n) return; products.push({barcode:bc, name:n, price:parseInt(p), group:g}); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
     async function deleteProduct(i) { if(!confirm("Xóa?")) return; products.splice(i,1); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
