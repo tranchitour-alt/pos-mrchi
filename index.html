@@ -190,8 +190,8 @@
 <div id="print-area"></div>
 
 <script>
-    // SCRIPT_URL mới nhất đã được dán vào đây
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwUGwZ72RltzE76MG_tlouNk6TJV83ofBg_vzgjjGF6qeji4lztclq98ziQu_pYS_UFIQ/exec";
+    // Cập nhật SCRIPT_URL mới nhất từ bạn
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxxpFUarcIDyjaT1BxA824P-ucCvSBYY63eZCyqb68bXbA_2JA1M7cYUITekRMfJIL_xQ/exec";
     
     let products = [];
     let salesHistory = [];
@@ -244,11 +244,13 @@
 
     async function loadCloudData() {
         try {
+            // Tải sản phẩm
             const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
             if (!prodRes.ok) throw new Error("Network response was not ok for getProducts");
             products = await prodRes.json();
             cats = ["Tất cả", ...new Set(products.map(p => p.group))];
             
+            // Tải lịch sử bán hàng
             const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
             if (!saleRes.ok) throw new Error("Network response was not ok for getSales");
             salesHistory = await saleRes.json();
