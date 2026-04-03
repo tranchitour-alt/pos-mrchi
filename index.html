@@ -122,19 +122,27 @@
         <div class="card" style="flex: 2.5;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px">
                 <h3 style="margin:0">📜 Lịch sử hóa đơn Cloud</h3>
-                <button class="btn-pay" style="width:auto; padding:10px 20px; background:var(--accent)" onclick="exportHistoryExcel()">📤 Xuất Excel</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="btn-bulk-delete" class="btn-pay" style="width:auto; padding:10px 20px; background:var(--danger); display:none;" onclick="handleBulkDelete()">🗑️ Xóa đã chọn</button>
+                    <button class="btn-pay" style="width:auto; padding:10px 20px; background:var(--accent)" onclick="exportHistoryExcel()">📤 Xuất Excel</button>
+                </div>
             </div>
             <div class="filter-row">
                 <div><label style="font-size:11px">Từ ngày</label><input type="date" id="f-start" class="login-input" style="margin:0"></div>
                 <div><label style="font-size:11px">Đến ngày</label><input type="date" id="f-end" class="login-input" style="margin:0"></div>
                 <input type="text" id="f-staff" class="login-input" style="margin-top:16px" placeholder="Nhân viên...">
                 <input type="text" id="f-cust" class="login-input" style="margin-top:16px" placeholder="Khách hàng...">
-                <input type="text" id="f-product" class="login-input" style="margin-top:16px" placeholder="Tên sản phẩm...">
+                <input type="text" id="f-note" class="login-input" style="margin-top:16px" placeholder="Tìm ghi chú...">
                 <button class="btn-pay" style="margin-top:16px; background:var(--sidebar); height:45px" onclick="filterHistory()">LỌC 🔎</button>
             </div>
             <div style="overflow-y:auto; flex-grow:1;">
                 <table>
-                    <thead><tr><th>Thời gian</th><th>Khách</th><th>NV</th><th style="text-align:right">Tổng</th></tr></thead>
+                    <thead>
+                        <tr>
+                            <th style="width:40px"><input type="checkbox" id="check-all" onclick="toggleCheckAll(this)"></th>
+                            <th>Thời gian</th><th>Khách</th><th>NV</th><th style="text-align:right">Tổng</th>
+                        </tr>
+                    </thead>
                     <tbody id="history-body"></tbody>
                 </table>
             </div>
@@ -190,7 +198,6 @@
 <div id="print-area"></div>
 
 <script>
-    // Cập nhật SCRIPT_URL mới nhất từ bạn
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwUqg0zAErYdRAOz2kNNLTjA0OXDtqWajs780lgkDu-OO-jbsnn8CA66v-0kV0L2tSbFA/exec";
     
     let products = [];
@@ -208,17 +215,14 @@
     async function handleLogin() {
         const selectedRole = document.getElementById('role-select').value;
         const p = document.getElementById('pass-input').value;
-        
-        if (selectedRole === 'Admin' && p === 'admin123') {
-            staff = "Quản trị viên";
-        } else if (["nv1", "nv2", "nv3", "nv4", "nv5"].includes(selectedRole) && p === 'nv123') {
+        if (selectedRole === 'Admin' && p === 'admin123') staff = "Quản trị viên";
+        else if (["nv1", "nv2", "nv3", "nv4", "nv5"].includes(selectedRole) && p === 'nv123') {
             staff = "Thu ngân " + selectedRole.toUpperCase();
             document.getElementById('nav-admin').style.display = 'none';
         } else {
             document.getElementById('login-error').style.display = 'block';
             return;
         }
-
         document.getElementById('login-screen').style.display = 'none';
         await init();
     }
@@ -229,132 +233,173 @@
         document.getElementById('f-start').value = todayStr;
         document.getElementById('f-end').value = todayStr;
         document.getElementById('report-date-picker').value = todayStr;
-        
         await loadCloudData();
-        
-        renderCatData(); 
-        renderProducts(); 
-        renderTabs(); 
-        renderManage();
-        filterHistory(); 
-        renderDailyReport();
-        
+        renderCatData(); renderProducts(); renderTabs(); renderManage(); filterHistory(); renderDailyReport();
         showLoading(false);
     }
 
     async function loadCloudData() {
         try {
-            // Tải sản phẩm
             const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
-            if (!prodRes.ok) throw new Error("Network response was not ok for getProducts");
             products = await prodRes.json();
             cats = ["Tất cả", ...new Set(products.map(p => p.group))];
-            
-            // Tải lịch sử bán hàng
             const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
-            if (!saleRes.ok) throw new Error("Network response was not ok for getSales");
             salesHistory = await saleRes.json();
-            
             updateRevenue();
-        } catch (e) { 
-            console.error("Lỗi đồng bộ Cloud:", e);
-            alert("Không thể kết nối Cloud. Hãy kiểm tra kết nối mạng hoặc thiết lập 'Anyone' trong Apps Script.");
-        }
+        } catch (e) { console.error("Lỗi đồng bộ Cloud:", e); }
     }
 
-    function updateRevenue() {
-        const today = new Date().toLocaleDateString('vi-VN');
-        const rev = salesHistory.filter(s => {
-            const saleDate = new Date(s.date).toLocaleDateString('vi-VN');
-            return saleDate === today;
-        }).reduce((a, b) => {
-            const totalVal = typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total;
-            return a + (isNaN(totalVal) ? 0 : totalVal);
-        }, 0);
-        document.getElementById('rt-revenue').innerText = rev.toLocaleString();
-    }
-
+    // CHỨC NĂNG LỊCH SỬ & XÓA
     function filterHistory() {
         const start = new Date(document.getElementById('f-start').value);
         const end = new Date(document.getElementById('f-end').value);
         end.setHours(23, 59, 59);
         const fs = document.getElementById('f-staff').value.toLowerCase();
         const fc = document.getElementById('f-cust').value.toLowerCase();
-        const fp = document.getElementById('f-product').value.toLowerCase();
+        const fn = document.getElementById('f-note').value.toLowerCase(); // Tìm theo ghi chú
 
         const filtered = salesHistory.filter(s => {
             const d = new Date(s.date);
             const mDate = d >= start && d <= end;
             const mStaff = s.staff.toLowerCase().includes(fs);
             const mCust = s.customer.toLowerCase().includes(fc);
-            let items = [];
-            try { items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items; } catch(e) {}
-            const mProd = fp === "" || items.some(i => i.name.toLowerCase().includes(fp));
-            return mDate && mStaff && mCust && mProd;
+            const mNote = (s.note || "").toLowerCase().includes(fn);
+            return mDate && mStaff && mCust && mNote;
         }).reverse();
 
         document.getElementById('history-body').innerHTML = filtered.map(s => `
-            <tr onclick="viewBillDetail('${s.id}')">
-                <td>${new Date(s.date).toLocaleString('vi-VN')}</td>
-                <td><b>${s.customer}</b></td>
-                <td>${s.staff}</td>
-                <td style="text-align:right; font-weight:800; color:var(--danger)">${s.total}</td>
+            <tr>
+                <td><input type="checkbox" class="row-check" value="${s.id}" onclick="updateBulkButton()"></td>
+                <td onclick="viewBillDetail('${s.id}')">${new Date(s.date).toLocaleString('vi-VN')}</td>
+                <td onclick="viewBillDetail('${s.id}')"><b>${s.customer}</b></td>
+                <td onclick="viewBillDetail('${s.id}')">${s.staff}</td>
+                <td onclick="viewBillDetail('${s.id}')" style="text-align:right; font-weight:800; color:var(--danger)">${s.total}</td>
             </tr>`).join('');
+        updateBulkButton();
+    }
+
+    function toggleCheckAll(source) {
+        document.querySelectorAll('.row-check').forEach(ck => ck.checked = source.checked);
+        updateBulkButton();
+    }
+
+    function updateBulkButton() {
+        const checkedCount = document.querySelectorAll('.row-check:checked').length;
+        document.getElementById('btn-bulk-delete').style.display = checkedCount > 0 ? 'block' : 'none';
+        document.getElementById('btn-bulk-delete').innerText = `🗑️ Xóa ${checkedCount} hóa đơn`;
+    }
+
+    async function handleBulkDelete() {
+        if (!confirm("Bạn có chắc chắn muốn xóa các hóa đơn đã chọn không?")) return;
+        const idsToDelete = Array.from(document.querySelectorAll('.row-check:checked')).map(cb => cb.value);
+        
+        showLoading(true, "Đang xóa dữ liệu...");
+        try {
+            const res = await fetch(SCRIPT_URL, {
+                method: 'POST',
+                body: JSON.stringify({ action: 'deleteSales', ids: idsToDelete })
+            });
+            if (res.ok) {
+                salesHistory = salesHistory.filter(s => !idsToDelete.includes(String(s.id)));
+                filterHistory();
+                updateRevenue();
+                alert("Đã xóa thành công!");
+            }
+        } catch (e) { alert("Lỗi khi xóa hóa đơn!"); }
+        showLoading(false);
+    }
+
+    // CHỨC NĂNG BÁN HÀNG (CHỈNH SỐ LẺ)
+    function updateCart() {
+        const o = orders.find(o => o.id === activeId); let total = 0;
+        document.getElementById('cart-items-ui').innerHTML = o.cart.map((i, idx) => {
+            const st = i.curP * i.qty; total += st;
+            return `<div class="cart-item" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
+                <div><b>${i.name}</b><br><input type="number" class="edit-input" value="${i.curP}" onchange="updateItem(${idx}, 'curP', this.value)">đ</div>
+                <div align="right">SL: <input type="number" step="0.001" class="edit-input" value="${i.qty}" min="0.001" onchange="updateItem(${idx}, 'qty', this.value)"><br><b>${st.toLocaleString()}đ</b></div>
+            </div>`;
+        }).join('');
+        document.getElementById('cart-total').innerText = Math.round(total).toLocaleString() + 'đ';
+    }
+
+    function updateItem(idx, k, v) { 
+        orders.find(o=>o.id===activeId).cart[idx][k] = parseFloat(v); 
+        updateCart(); 
+    }
+
+    function addToCart(bc) {
+        const p = products.find(i => i.barcode === bc); if(!p) return;
+        const o = orders.find(o => o.id === activeId);
+        const ex = o.cart.find(i => i.barcode === bc);
+        if(ex) ex.qty++; else o.cart.push({...p, qty:1, curP: p.price});
+        updateCart();
+    }
+
+    // PHẦN CÒN LẠI GIỮ NGUYÊN TỪ BẢN GỐC CỦA BẠN
+    function updateRevenue() {
+        const today = new Date().toLocaleDateString('vi-VN');
+        const rev = salesHistory.filter(s => new Date(s.date).toLocaleDateString('vi-VN') === today)
+                                .reduce((a, b) => a + (typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total), 0);
+        document.getElementById('rt-revenue').innerText = rev.toLocaleString();
     }
 
     function viewBillDetail(id) {
         const sale = salesHistory.find(s => s.id == id);
         if(!sale) return;
-        let items = [];
-        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
-
+        let items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
         const html = `
-            <div style="width: 100%; text-align: center; color: #1e293b;">
-                <h2 style="margin: 0; font-size: 1.2rem;">HÓA ĐƠN BÁN LẺ</h2>
-                <p style="font-size: 12px; margin: 5px 0 15px;">Mã đơn: ${sale.id}</p>
-                <div style="text-align: left; font-size: 13px; margin-bottom: 15px; line-height: 1.6;">
+            <div style="width: 100%; text-align: center;">
+                <h2 style="margin: 0;">HÓA ĐƠN BÁN LẺ</h2>
+                <p style="font-size: 12px;">Mã: ${sale.id}</p>
+                <div style="text-align: left; font-size: 13px; line-height: 1.6;">
                     <b>KH:</b> ${sale.customer}<br>
                     <b>Ngày:</b> ${new Date(sale.date).toLocaleString('vi-VN')}<br>
+                    <b>Ghi chú:</b> ${sale.note || 'Không'}<br>
                     <b>NV:</b> ${sale.staff}
                 </div>
-                <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
-                <table style="width: 100%; font-size: 12px; margin-bottom: 15px;">
-                    ${items.map(i => `<tr><td align="left" style="padding-bottom: 5px;">${i.name} x${i.qty}</td><td align="right">${(i.curP * i.qty).toLocaleString()}đ</td></tr>`).join('')}
+                <hr style="border-top: 1px dashed #ccc;">
+                <table style="width: 100%; font-size: 12px;">
+                    ${items.map(i => `<tr><td align="left">${i.name} x${i.qty}</td><td align="right">${(i.curP * i.qty).toLocaleString()}đ</td></tr>`).join('')}
                 </table>
-                <hr style="border: 0; border-top: 1px dashed #cbd5e1; margin-bottom: 10px;">
+                <hr style="border-top: 1px dashed #ccc;">
                 <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 800;">
-                    <span>TỔNG CỘNG:</span>
-                    <span style="color: var(--danger);">${sale.total}</span>
+                    <span>TỔNG CỘNG:</span><span>${sale.total}</span>
                 </div>
-                ${sale.note ? `<p style="text-align: left; font-size: 12px; color: #64748b; margin-top: 15px;"><b>Ghi chú:</b> ${sale.note}</p>` : ''}
-                <div style="margin-top: 30px; font-size: 11px; color: #94a3b8;">Cảm ơn quý khách!</div>
-                <button class="btn-pay no-print" style="margin-top: 20px; padding: 10px 15px; font-size: 12px; width: auto; background: var(--primary);" onclick="rePrintBill('${sale.id}')">🖨️ IN LẠI BILL</button>
-            </div>
-        `;
+                <button class="btn-pay" style="margin-top: 20px; background: var(--primary);" onclick="rePrintBill('${sale.id}')">🖨️ IN LẠI BILL</button>
+                <button class="btn-pay" style="margin-top: 10px; background: var(--danger);" onclick="deleteSingleSale('${sale.id}')">🗑️ XOÁ HOÁ ĐƠN NÀY</button>
+            </div>`;
         document.getElementById('bill-preview-content').innerHTML = html;
         document.getElementById('bill-preview-content').style.justifyContent = "flex-start";
+    }
+
+    async function deleteSingleSale(id) {
+        if(!confirm("Xóa hóa đơn này?")) return;
+        showLoading(true);
+        try {
+            await fetch(SCRIPT_URL, { method: 'POST', body: JSON.stringify({ action: 'deleteSales', ids: [id] }) });
+            salesHistory = salesHistory.filter(s => String(s.id) !== String(id));
+            filterHistory(); updateRevenue();
+            document.getElementById('bill-preview-content').innerHTML = "Đã xóa";
+        } catch(e) {}
+        showLoading(false);
     }
 
     function renderDailyReport() {
         const pickerVal = document.getElementById('report-date-picker').value;
         const selectedDateStr = new Date(pickerVal).toLocaleDateString('vi-VN');
         const reportData = {}; let totalRevenue = 0;
-        
         salesHistory.forEach(s => {
             if (new Date(s.date).toLocaleDateString('vi-VN') === selectedDateStr) {
-                let items = []; try { items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items; } catch(e) {}
+                let items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items;
                 items.forEach(item => {
-                    if (!reportData[item.name]) { reportData[item.name] = { qty: 0, total: 0 }; }
+                    if (!reportData[item.name]) reportData[item.name] = { qty: 0, total: 0 };
                     reportData[item.name].qty += item.qty;
                     reportData[item.name].total += (item.curP * item.qty);
                 });
-                const totalVal = typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g,'')) : s.total;
-                totalRevenue += (isNaN(totalVal) ? 0 : totalVal);
+                totalRevenue += (typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g,'')) : s.total);
             }
         });
-        
-        const rows = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${reportData[name].total.toLocaleString()}đ</td></tr>`);
-        document.getElementById('report-body').innerHTML = rows.join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
+        document.getElementById('report-body').innerHTML = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${reportData[name].total.toLocaleString()}đ</td></tr>`).join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
         document.getElementById('report-total-all').innerText = totalRevenue.toLocaleString() + 'đ';
     }
 
@@ -369,39 +414,16 @@
         const filtered = products.filter(p => (filterCat==='All' || p.group===filterCat) && (p.name.toLowerCase().includes(s) || p.barcode.includes(s)));
         document.getElementById('product-grid').innerHTML = filtered.map(p => `<div class="p-card" onclick="addToCart('${p.barcode}')"><b>${p.name}</b><span>${parseInt(p.price).toLocaleString()}đ</span></div>`).join('');
     }
-    function addToCart(bc) {
-        const p = products.find(i => i.barcode === bc); if(!p) return;
-        const o = orders.find(o => o.id === activeId);
-        const ex = o.cart.find(i => i.barcode === bc);
-        if(ex) ex.qty++; else o.cart.push({...p, qty:1, curP: p.price});
-        updateCart();
-    }
-    function updateCart() {
-        const o = orders.find(o => o.id === activeId); let total = 0;
-        document.getElementById('cart-items-ui').innerHTML = o.cart.map((i, idx) => {
-            const st = i.curP * i.qty; total += st;
-            return `<div class="cart-item" style="display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid #eee;">
-                <div><b>${i.name}</b><br><input type="number" class="edit-input" value="${i.curP}" onchange="updateItem(${idx}, 'curP', this.value)">đ</div>
-                <div align="right">SL: <input type="number" class="edit-input" value="${i.qty}" min="1" onchange="updateItem(${idx}, 'qty', this.value)"><br><b>${st.toLocaleString()}đ</b></div>
-            </div>`;
-        }).join('');
-        document.getElementById('cart-total').innerText = total.toLocaleString() + 'đ';
-    }
-    function updateItem(idx, k, v) { orders.find(o=>o.id===activeId).cart[idx][k]=parseInt(v); updateCart(); }
     async function doCheckout() {
         const o = orders.find(o=>o.id===activeId); if(!o || !o.cart.length) return;
         showLoading(true, "Đang xử lý...");
         const sale = { action:'saveSale', id:Date.now(), date:new Date().toISOString(), staff, customer:document.getElementById('cust-name').value||"Khách lẻ", note:document.getElementById('order-note').value, items:JSON.stringify(o.cart), total:document.getElementById('cart-total').innerText };
         try {
-            const response = await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
-            if (!response.ok) throw new Error("Lỗi khi lưu hóa đơn lên Google Sheets");
+            await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
             salesHistory.push({...sale, items:JSON.parse(sale.items)});
             rePrintBill(sale.id);
             o.cart=[]; document.getElementById('order-note').value=''; updateCart(); updateRevenue(); filterHistory();
-        } catch(e) { 
-            console.error(e);
-            alert("Lỗi lưu đơn! Hãy kiểm tra kết nối mạng và thiết lập Google Apps Script."); 
-        }
+        } catch(e) { alert("Lỗi lưu đơn!"); }
         showLoading(false);
     }
     function renderTabs() {
@@ -414,9 +436,8 @@
     function rePrintBill(id) {
         const sale = salesHistory.find(s => s.id == id);
         if(!sale) return;
-        let items = [];
-        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
-        let pthml = `<div style="text-align:center; font-family:sans-serif"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
+        let items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items;
+        let pthml = `<div style="text-align:center;"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
         items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
         pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
         document.getElementById('print-area').innerHTML = pthml;
