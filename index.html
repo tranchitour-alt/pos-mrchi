@@ -46,7 +46,6 @@
         .p-card:hover { border-color: var(--primary); background: var(--primary-light); transform: translateY(-3px); }
 
         .filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 15px; background: #f8fafc; padding: 15px; border-radius: 15px; }
-
         .edit-input { width: 70px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; text-align: center; }
 
         #print-area { display: none; }
@@ -191,8 +190,8 @@
 <div id="print-area"></div>
 
 <script>
-    // URL Web App từ Google Apps Script của bạn
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyenTYo7JH9MoGAyTZBvOLjf6lAmfM3cyqGX4uC58m7UPAzRKwn0i4ElVkKHbdDuPLS2g/exec";
+    // Cập nhật SCRIPT_URL mới nhất
+    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJEI6Wue4etACPrTMNXFwu7zNvwwrMNqwJwsXbjXVjAtUHGcUJ-urC8nam1Gb53GPckA/exec";
     
     let products = [];
     let salesHistory = [];
@@ -206,31 +205,22 @@
         document.getElementById('loading-text').innerText = text;
     }
 
-    // --- CẬP NHẬT HÀM ĐĂNG NHẬP CHO 5 TÀI KHOẢN ---
     async function handleLogin() {
         const selectedRole = document.getElementById('role-select').value;
         const p = document.getElementById('pass-input').value;
         
-        // Kiểm tra Admin
         if (selectedRole === 'Admin' && p === 'admin123') {
             staff = "Quản trị viên";
-            document.getElementById('login-screen').style.display = 'none';
-            init();
-            return;
-        }
-
-        // Kiểm tra 5 tài khoản thu ngân (Dùng chung pass nv123)
-        const cashierAccounts = ["nv1", "nv2", "nv3", "nv4", "nv5"];
-        if (cashierAccounts.includes(selectedRole) && p === 'nv123') {
+        } else if (["nv1", "nv2", "nv3", "nv4", "nv5"].includes(selectedRole) && p === 'nv123') {
             staff = "Thu ngân " + selectedRole.toUpperCase();
-            document.getElementById('login-screen').style.display = 'none';
-            document.getElementById('nav-admin').style.display = 'none'; // Thu ngân không vào được kho
-            init();
+            document.getElementById('nav-admin').style.display = 'none';
+        } else {
+            document.getElementById('login-error').style.display = 'block';
             return;
         }
 
-        // Nếu sai
-        document.getElementById('login-error').style.display = 'block';
+        document.getElementById('login-screen').style.display = 'none';
+        await init();
     }
 
     async function init() {
@@ -239,23 +229,51 @@
         document.getElementById('f-start').value = todayStr;
         document.getElementById('f-end').value = todayStr;
         document.getElementById('report-date-picker').value = todayStr;
+        
         await loadCloudData();
-        renderCatData(); renderProducts(); renderTabs(); renderManage();
-        filterHistory(); renderDailyReport();
+        
+        renderCatData(); 
+        renderProducts(); 
+        renderTabs(); 
+        renderManage();
+        filterHistory(); 
+        renderDailyReport();
+        
         showLoading(false);
     }
 
     async function loadCloudData() {
         try {
+            // Tải sản phẩm
             const prodRes = await fetch(SCRIPT_URL + "?action=getProducts");
             products = await prodRes.json();
             cats = ["Tất cả", ...new Set(products.map(p => p.group))];
+            
+            // Tải lịch sử bán hàng
             const saleRes = await fetch(SCRIPT_URL + "?action=getSales");
             salesHistory = await saleRes.json();
+            
+            // Cập nhật doanh thu trên giao diện
             updateRevenue();
-        } catch (e) { console.log("Lỗi tải Cloud"); }
+        } catch (e) { 
+            console.error("Lỗi đồng bộ Cloud:", e);
+            alert("Không thể kết nối Cloud. Hãy kiểm tra kết nối mạng hoặc SCRIPT_URL.");
+        }
     }
 
+    function updateRevenue() {
+        const today = new Date().toLocaleDateString('vi-VN');
+        const rev = salesHistory.filter(s => {
+            const saleDate = new Date(s.date).toLocaleDateString('vi-VN');
+            return saleDate === today;
+        }).reduce((a, b) => {
+            const totalVal = typeof b.total === 'string' ? parseInt(b.total.replace(/[^\d]/g,'')) : b.total;
+            return a + totalVal;
+        }, 0);
+        document.getElementById('rt-revenue').innerText = rev.toLocaleString();
+    }
+
+    // Các hàm xử lý giao diện khác giữ nguyên như yêu cầu của bạn...
     function filterHistory() {
         const start = new Date(document.getElementById('f-start').value);
         const end = new Date(document.getElementById('f-end').value);
@@ -275,7 +293,7 @@
             return mDate && mStaff && mCust && mProd;
         }).reverse();
 
-        document.getElementById('history-body').innerHTML = filtered.map((s, idx) => `
+        document.getElementById('history-body').innerHTML = filtered.map(s => `
             <tr onclick="viewBillDetail('${s.id}')">
                 <td>${new Date(s.date).toLocaleString('vi-VN')}</td>
                 <td><b>${s.customer}</b></td>
@@ -291,7 +309,7 @@
         try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
 
         const html = `
-            <div style="width: 100%; text-align: center; font-family: sans-serif; color: #1e293b;">
+            <div style="width: 100%; text-align: center; color: #1e293b;">
                 <h2 style="margin: 0; font-size: 1.2rem;">HÓA ĐƠN BÁN LẺ</h2>
                 <p style="font-size: 12px; margin: 5px 0 15px;">Mã đơn: ${sale.id}</p>
                 <div style="text-align: left; font-size: 13px; margin-bottom: 15px; line-height: 1.6;">
@@ -317,21 +335,11 @@
         document.getElementById('bill-preview-content').style.justifyContent = "flex-start";
     }
 
-    function rePrintBill(id) {
-        const sale = salesHistory.find(s => s.id == id);
-        if(!sale) return;
-        let items = [];
-        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
-        let pthml = `<div style="text-align:center; font-family:sans-serif"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
-        items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
-        pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
-        document.getElementById('print-area').innerHTML = pthml;
-        window.print();
-    }
-
     function renderDailyReport() {
-        const selectedDateStr = new Date(document.getElementById('report-date-picker').value).toLocaleDateString('vi-VN');
+        const pickerVal = document.getElementById('report-date-picker').value;
+        const selectedDateStr = new Date(pickerVal).toLocaleDateString('vi-VN');
         const reportData = {}; let totalRevenue = 0;
+        
         salesHistory.forEach(s => {
             if (new Date(s.date).toLocaleDateString('vi-VN') === selectedDateStr) {
                 let items = []; try { items = typeof s.items === 'string' ? JSON.parse(s.items) : s.items; } catch(e) {}
@@ -340,14 +348,17 @@
                     reportData[item.name].qty += item.qty;
                     reportData[item.name].total += (item.curP * item.qty);
                 });
-                totalRevenue += typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g, '')) : s.total;
+                const totalVal = typeof s.total === 'string' ? parseInt(s.total.replace(/[^\d]/g,'')) : s.total;
+                totalRevenue += totalVal;
             }
         });
+        
         const rows = Object.keys(reportData).map(name => `<tr><td><b>${name}</b></td><td align="center">${reportData[name].qty}</td><td align="right">${Math.round(reportData[name].total/reportData[name].qty).toLocaleString()}đ</td><td align="right">${reportData[name].total.toLocaleString()}đ</td></tr>`);
         document.getElementById('report-body').innerHTML = rows.join('') || '<tr><td colspan="4" align="center">Trống</td></tr>';
         document.getElementById('report-total-all').innerText = totalRevenue.toLocaleString() + 'đ';
     }
 
+    // Các hàm điều hướng và quản lý đơn hàng cơ bản
     function renderCatData() {
         let html = `<div class="cat-chip ${filterCat==='All'?'active':''}" onclick="setFilter('All')">Tất cả</div>`;
         cats.filter(c => c && c !== "Tất cả").forEach(c => html += `<div class="cat-chip ${filterCat===c?'active':''}" onclick="setFilter('${c}')">${c}</div>`);
@@ -380,14 +391,14 @@
     function updateItem(idx, k, v) { orders.find(o=>o.id===activeId).cart[idx][k]=parseInt(v); updateCart(); }
     async function doCheckout() {
         const o = orders.find(o=>o.id===activeId); if(!o || !o.cart.length) return;
-        showLoading(true, "Lưu đơn...");
+        showLoading(true, "Đang xử lý...");
         const sale = { action:'saveSale', id:Date.now(), date:new Date().toISOString(), staff, customer:document.getElementById('cust-name').value||"Khách lẻ", note:document.getElementById('order-note').value, items:JSON.stringify(o.cart), total:document.getElementById('cart-total').innerText };
         try {
             await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify(sale) });
             salesHistory.push({...sale, items:JSON.parse(sale.items)});
             rePrintBill(sale.id);
             o.cart=[]; document.getElementById('order-note').value=''; updateCart(); updateRevenue(); filterHistory();
-        } catch(e) { alert("Lỗi!"); }
+        } catch(e) { alert("Lỗi lưu đơn!"); }
         showLoading(false);
     }
     function renderTabs() {
@@ -397,7 +408,17 @@
     function addOrder() { const id = orders.length>0?Math.max(...orders.map(o=>o.id))+1:1; orders.push({id, customer:'', cart:[]}); switchOrder(id); }
     function showPage(id, el) { document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active')); document.getElementById(id).classList.add('active'); el.classList.add('active'); if(id==='page-report') renderDailyReport(); }
     function handleBarcode(e) { if(e.key==='Enter') { addToCart(e.target.value); e.target.value=''; } }
-    function updateRevenue() { const today = new Date().toLocaleDateString('vi-VN'); const rev = salesHistory.filter(s => new Date(s.date).toLocaleDateString('vi-VN') === today).reduce((a,b) => a + parseInt(b.total.replace(/[^\d]/g,'')), 0); document.getElementById('rt-revenue').innerText = rev.toLocaleString(); }
+    function rePrintBill(id) {
+        const sale = salesHistory.find(s => s.id == id);
+        if(!sale) return;
+        let items = [];
+        try { items = typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items; } catch(e) {}
+        let pthml = `<div style="text-align:center; font-family:sans-serif"><h3>HÓA ĐƠN BÁN LẺ</h3><p>KH: ${sale.customer}</p></div><hr>`;
+        items.forEach(i => pthml += `<div style="display:flex; justify-content:space-between"><span>${i.name} x${i.qty}</span><span>${(i.curP*i.qty).toLocaleString()}đ</span></div>`);
+        pthml += `<hr><h4 style="text-align:right">TỔNG: ${sale.total}</h4>`;
+        document.getElementById('print-area').innerHTML = pthml;
+        window.print();
+    }
     function renderManage() { document.getElementById('manage-list').innerHTML = products.map((p,i) => `<tr><td>${p.barcode}</td><td><b>${p.name}</b></td><td>${parseInt(p.price).toLocaleString()}đ</td><td>${p.group}</td><td><button onclick="deleteProduct(${i})" style="color:red; border:none; background:none; cursor:pointer">Xóa</button></td></tr>`).join(''); }
     async function addManualProduct() { const bc=document.getElementById('new-bc').value, n=document.getElementById('new-name').value, p=document.getElementById('new-price').value, g=document.getElementById('new-group').value; if(!bc||!n) return; products.push({barcode:bc, name:n, price:parseInt(p), group:g}); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
     async function deleteProduct(i) { if(!confirm("Xóa?")) return; products.splice(i,1); await fetch(SCRIPT_URL, { method:'POST', body:JSON.stringify({action:'updateProducts', products}) }); renderManage(); renderProducts(); }
